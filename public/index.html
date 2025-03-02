@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>X/Twitter Posts Manager</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .post-card {
+            margin-bottom: 15px;
+            border-left: 4px solid #1DA1F2;
+        }
+        .container {
+            max-width: 800px;
+        }
+        .char-counter {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+        .char-warning {
+            color: #dc3545;
+        }
+        .arduino-line {
+            font-family: 'Courier New', monospace;
+            height: 20px;
+            line-height: 20px;
+            color: #1de9b6;
+            text-shadow: 0 0 5px rgba(29, 233, 182, 0.5);
+            overflow: hidden;
+            white-space: nowrap;
+        }
+        #arduinoPreview {
+            background-color: #000 !important;
+            border: 1px solid #444;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.3) inset, 0 0 5px rgba(29, 233, 182, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">X/Twitter Posts Manager</h1>
+
+        <!-- Post Entry Form -->
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Add New Post</h5>
+            </div>
+            <div class="card-body">
+                <form id="postForm">
+                    <div class="mb-3">
+                        <label for="postText" class="form-label">Post Text</label>
+                        <textarea class="form-control" id="postText" rows="3" maxlength="280" required></textarea>
+                        <div class="char-counter mt-1">
+                            <span id="charCount">0</span>/280 characters
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="authorName" class="form-label">Author Name</label>
+                        <input type="text" class="form-control" id="authorName" placeholder="Anonymous">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save Post</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Display Saved Posts -->
+        <div class="card">
+            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Saved Posts</h5>
+                <button id="refreshBtn" class="btn btn-sm btn-light">Refresh</button>
+            </div>
+            <div class="card-body">
+                <div id="postsContainer">
+                    <!-- Posts will be inserted here -->
+                    <div class="text-center py-3 text-muted">Loading posts...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Arduino Preview Section -->
+        <div class="card mt-4">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Arduino Preview</h5>
+                <div>
+                    <button id="toggleScrollBtn" class="btn btn-sm btn-light me-2">Start Scrolling</button>
+                    <button id="nextPostBtn" class="btn btn-sm btn-outline-light">Next Post</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">This is how posts will appear on your Arduino LCD:</p>
+                <div class="p-3 bg-dark rounded position-relative">
+                    <div class="position-absolute top-0 start-0 p-1 bg-secondary text-light rounded-pill" style="font-size: 0.7rem; margin: 3px;">16x2 LCD</div>
+                    <div id="arduinoPreview" class="bg-dark text-light p-3 font-monospace d-flex flex-column justify-content-center" style="border: 2px solid #444; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 14px; height: 80px; overflow: hidden;">
+                        <!-- Preview content will be inserted here -->
+                        <div class="arduino-line">---------------</div>
+                        <div class="arduino-line">---------------</div>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-3">
+                    <div>
+                        <p class="mb-1">API Endpoint for Arduino:</p>
+                        <code id="apiEndpoint">/api/arduino/posts</code>
+                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="copyEndpoint()">Copy</button>
+                    </div>
+                    <div class="text-muted small">
+                        <span id="previewPostIndicator">Post 0/0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const postForm = document.getElementById('postForm');
+        const postText = document.getElementById('postText');
+        const authorName = document.getElementById('authorName');
+        const charCount = document.getElementById('charCount');
+        const postsContainer = document.getElementById('postsContainer');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const arduinoPreview = document.getElementById('arduinoPreview');
+        
+        // Character Counter
+        postText.addEventListener('input', () => {
+            const count = postText.value.length;
+            charCount.textContent = count;
+            
+            if (count > 200) {
+                charCount.classList.add('char-warning');
+            } else {
+                charCount.classList.remove('char-warning');
+            }
+        });
+        
+        // Submit Form
+        postForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const text = postText.value.trim();
+            const author = authorName.value.trim() || 'Anonymous';
+            
+            if (!text) {
+                alert('Post text is required!');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/posts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ text, author })
+                });
+                
+                if (response.ok) {
+                    postForm.reset();
+                    charCount.textContent = '0';
+                    fetchPosts();
+                    alert('Post added successfully!');
+                } else {
+                    const data = await response.json();
+                    alert(`Error: ${data.message || 'Failed to add post'}`);
+                }
+            } catch (error) {
+                console.error('Error adding post:', error);
+                alert('Failed to add post. Check console for details.');
+            }
+        });
+        
+        // Fetch Posts
+        async function fetchPosts() {
+            try {
+                const response = await fetch('/api/posts');
+                if (!response.ok) throw new Error('Failed to fetch posts');
+                
+                const posts = await response.json();
+                displayPosts(posts);
+                updateArduinoPreview(posts);
+            } catch (error) {
+                console.error('Error fetching posts:', error);
+                postsContainer.innerHTML = `<div class="alert alert-danger">Failed to load posts: ${error.message}</div>`;
+            }
+        }
+        
+        // Display Posts
+        function displayPosts(posts) {
+            if (posts.length === 0) {
+                postsContainer.innerHTML = '<div class="text-center py-3 text-muted">No posts found. Add your first post above!</div>';
+                return;
+            }
+            
+            postsContainer.innerHTML = '';
+            
+            posts.forEach(post => {
+                const date = new Date(post.createdAt).toLocaleString();
+                
+                const postCard = document.createElement('div');
+                postCard.className = 'card post-card';
+                postCard.innerHTML = `
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <h6 class="card-subtitle text-primary mb-2">@${post.author}</h6>
+                            <button class="btn btn-sm btn-outline-danger delete-btn" data-id="${post._id}">Delete</button>
+                        </div>
+                        <p class="card-text">${post.text}</p>
+                        <div class="text-muted small">${date}</div>
+                    </div>
+                `;
+                
+                postsContainer.appendChild(postCard);
+                
+                // Add delete event listener
+                const deleteBtn = postCard.querySelector('.delete-btn');
+                deleteBtn.addEventListener('click', () => deletePost(post._id));
+            });
+        }
+        
+        // Arduino Preview Variables
+        let previewPosts = [];
+        let currentPreviewPostIndex = 0;
+        let isScrolling = false;
+        let scrollPosition = 0;
+        let scrollInterval;
+        const SCROLL_SPEED = 400; // ms
+
+        // Update Arduino Preview
+        function updateArduinoPreview(posts) {
+            if (posts.length === 0) {
+                arduinoPreview.innerHTML = '<div class="arduino-line">No posts to</div><div class="arduino-line">display</div>';
+                document.getElementById('previewPostIndicator').textContent = 'Post 0/0';
+                previewPosts = [];
+                return;
+            }
+            
+            // Store posts for preview
+            previewPosts = posts;
+            currentPreviewPostIndex = 0;
+            
+            // Display the first post
+            displayPreviewPost(currentPreviewPostIndex);
+        }
+        
+        // Display a specific post in the Arduino preview
+        function displayPreviewPost(index) {
+            // Stop any ongoing scrolling
+            if (isScrolling) {
+                clearInterval(scrollInterval);
+                isScrolling = false;
+                document.getElementById('toggleScrollBtn').textContent = 'Start Scrolling';
+            }
+            
+            scrollPosition = 0;
+            
+            if (previewPosts.length === 0) {
+                return;
+            }
+            
+            const post = previewPosts[index];
+            
+            // Format for 16x2 LCD display
+            const authorName = `@${post.author}`;
+            const firstLine = authorName.length > 16 ? authorName.substring(0, 13) + '...' : authorName.padEnd(16, ' ');
+            
+            // For second line, show just the beginning if not scrolling
+            const secondLine = post.text.length > 16 ? post.text.substring(0, 16) : post.text.padEnd(16, ' ');
+            
+            arduinoPreview.innerHTML = `<div class="arduino-line">${firstLine}</div><div class="arduino-line">${secondLine}</div>`;
+            
+            // Update post indicator
+            document.getElementById('previewPostIndicator').textContent = `Post ${index + 1}/${previewPosts.length}`;
+        }
+        
+        // Toggle scrolling for the preview
+        function toggleScrolling() {
+            if (previewPosts.length === 0) return;
+            
+            const toggleBtn = document.getElementById('toggleScrollBtn');
+            
+            if (isScrolling) {
+                // Stop scrolling
+                clearInterval(scrollInterval);
+                isScrolling = false;
+                toggleBtn.textContent = 'Start Scrolling';
+                
+                // Reset display
+                displayPreviewPost(currentPreviewPostIndex);
+            } else {
+                // Start scrolling
+                isScrolling = true;
+                toggleBtn.textContent = 'Stop Scrolling';
+                scrollPosition = 0;
+                
+                // Set up scrolling interval
+                scrollInterval = setInterval(() => {
+                    scrollPreviewText();
+                }, SCROLL_SPEED);
+            }
+        }
+        
+        // Scroll text in the preview
+        function scrollPreviewText() {
+            const post = previewPosts[currentPreviewPostIndex];
+            
+            // If text is short enough to fit without scrolling
+            if (post.text.length <= 16) {
+                clearInterval(scrollInterval);
+                isScrolling = false;
+                document.getElementById('toggleScrollBtn').textContent = 'Start Scrolling';
+                return;
+            }
+            
+            // Increment scroll position
+            scrollPosition++;
+            
+            // Display the appropriate portion of text
+            const authorName = `@${post.author}`;
+            const firstLine = authorName.length > 16 ? authorName.substring(0, 13) + '...' : authorName.padEnd(16, ' ');
+            
+            let secondLine;
+            
+            // If we've scrolled past the end, wrap around
+            if (scrollPosition > post.text.length) {
+                scrollPosition = 0;
+                secondLine = post.text.substring(0, 16);
+            } else if (scrollPosition + 16 <= post.text.length) {
+                // Normal scrolling
+                secondLine = post.text.substring(scrollPosition, scrollPosition + 16);
+            } else {
+                // End of text
+                secondLine = post.text.substring(scrollPosition);
+                // Pad with spaces to maintain 16 chars
+                secondLine = secondLine.padEnd(16, ' ');
+            }
+            
+            arduinoPreview.innerHTML = `<div class="arduino-line">${firstLine}</div><div class="arduino-line">${secondLine}</div>`;
+        }
+        
+        // Show next post in the preview
+        function showNextPreviewPost() {
+            if (previewPosts.length === 0) return;
+            
+            // Stop scrolling if active
+            if (isScrolling) {
+                clearInterval(scrollInterval);
+                isScrolling = false;
+                document.getElementById('toggleScrollBtn').textContent = 'Start Scrolling';
+            }
+            
+            // Move to next post
+            currentPreviewPostIndex = (currentPreviewPostIndex + 1) % previewPosts.length;
+            displayPreviewPost(currentPreviewPostIndex);
+        }
+        
+        // Delete Post
+        async function deletePost(id) {
+            if (!confirm('Are you sure you want to delete this post?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/posts/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    fetchPosts();
+                } else {
+                    const data = await response.json();
+                    alert(`Error: ${data.message || 'Failed to delete post'}`);
+                }
+            } catch (error) {
+                console.error('Error deleting post:', error);
+                alert('Failed to delete post. Check console for details.');
+            }
+        }
+        
+        // Copy API Endpoint
+        function copyEndpoint() {
+            const endpointEl = document.getElementById('apiEndpoint');
+            const endpoint = window.location.origin + endpointEl.textContent;
+            
+            navigator.clipboard.writeText(endpoint)
+                .then(() => alert('API endpoint copied to clipboard!'))
+                .catch(err => console.error('Failed to copy:', err));
+        }
+        
+        // Refresh Button
+        refreshBtn.addEventListener('click', fetchPosts);
+        
+        // Toggle Scrolling Button
+        document.getElementById('toggleScrollBtn').addEventListener('click', toggleScrolling);
+        
+        // Next Post Button
+        document.getElementById('nextPostBtn').addEventListener('click', showNextPreviewPost);
+        
+        // Initial load
+        window.addEventListener('DOMContentLoaded', fetchPosts);
+    </script>
+</body>
+</html>
